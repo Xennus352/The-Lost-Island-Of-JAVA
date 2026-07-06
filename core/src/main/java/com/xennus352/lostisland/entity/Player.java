@@ -4,11 +4,15 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.MathUtils;
 
 public class Player {
     private Texture texture;
     private float x, y;
     private float speed;
+    // Virtual Design Resolution (မူလဒီဇိုင်း Size)
+    private static final float VIRTUAL_WIDTH = 640;
+    private static final float VIRTUAL_HEIGHT = 480;
 
     public Player(float startX, float startY) {
         // 🌟 အရေးကြီး - မင်းရဲ့ assets/ ထဲမှာ သင်္ဘော သို့မဟုတ် player အတွက် 'img.png' ရှိနေရပါမယ်
@@ -20,7 +24,7 @@ public class Player {
 
 
     public void update(float delta) {
-        // Keyboard Input တွေကို ဖတ်ပြီး တန်ဖိုးတွေ ပေါင်း/နှုတ် လုပ်ခြင်း (Manual Movement)
+        // 1. Handle Movement Input
         if (Gdx.input.isKeyPressed(Input.Keys.W) || Gdx.input.isKeyPressed(Input.Keys.UP)) {
             y += speed * delta;
         }
@@ -33,6 +37,18 @@ public class Player {
         if (Gdx.input.isKeyPressed(Input.Keys.D) || Gdx.input.isKeyPressed(Input.Keys.RIGHT)) {
             x += speed * delta;
         }
+
+        // 2. Define Boundaries
+        // The player's X/Y is the bottom-left corner of the image.
+        // So, max X is the screen width minus the player's width.
+        float minX = 0;
+        float maxX = VIRTUAL_WIDTH - texture.getWidth();
+        float minY = 0;
+        float maxY = VIRTUAL_HEIGHT - texture.getHeight();
+
+        // 3. Apply Clamping every frame
+        this.x = MathUtils.clamp(this.x, minX, maxX);
+        this.y = MathUtils.clamp(this.y, minY, maxY);
     }
 
     public void draw(SpriteBatch batch) {
