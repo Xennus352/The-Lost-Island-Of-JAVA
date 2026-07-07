@@ -86,9 +86,14 @@ public class Player {
 
             String dir = "";
             if (up) dir += "N"; if (down) dir += "S"; if (left) dir += "W"; if (right) dir += "E";
+
             if (!dir.isEmpty()) {
                 lastDirection = dir;
-                currentFrame = new TextureRegion(textures.get(dir));
+
+                // SAFETY CHECK: Only update if the direction key exists in your map
+                if (textures.containsKey(dir)) {
+                    currentFrame = new TextureRegion(textures.get(dir));
+                }
             }
         }
 
