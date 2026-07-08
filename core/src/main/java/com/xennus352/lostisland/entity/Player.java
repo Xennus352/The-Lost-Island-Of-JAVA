@@ -25,7 +25,7 @@ public class Player {
     private boolean isMoving = false; // NEW
 
     private float x, y;
-    private float speed = 200f;
+    private float speed = 10f;
     private static final float VIRTUAL_WIDTH = 640;
     private static final float VIRTUAL_HEIGHT = 480;
 

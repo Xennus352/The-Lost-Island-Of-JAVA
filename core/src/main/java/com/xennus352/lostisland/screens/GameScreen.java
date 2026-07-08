@@ -9,9 +9,13 @@ import com.badlogic.gdx.utils.Scaling;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScalingViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
+import com.xennus352.lostisland.LostIslandGame;
 import com.xennus352.lostisland.entity.Player;
 
 public class GameScreen implements Screen {
+    private final LostIslandGame game;
+    private final String playerGender;
+
     private SpriteBatch batch;
     private Player player;
     private Texture backgroundTexture;
@@ -22,13 +26,21 @@ public class GameScreen implements Screen {
     private static final float VIRTUAL_WIDTH = 640;
     private static final float VIRTUAL_HEIGHT = 480;
 
+    // 🌟 ADDED CONSTRUCTOR HERE 🌟
+    public GameScreen(LostIslandGame game, String playerGender) {
+        this.game = game;
+        this.playerGender = playerGender;
+    }
+
     @Override
     public void show() {
         batch = new SpriteBatch();
-        // Player ကို Screen ရဲ့ Coordinates (100, 100) နေရာမှာ စတင် ပေါ်ခိုင်းလိုက်တာပါ
-        player = new Player(100, 100);
-        backgroundTexture = new Texture("tileset.png");
 
+        // Player ကို ဆောက်တဲ့နေရာမှာ ရွေးချယ်ထားတဲ့ Gender ပါ တစ်ခါတည်း ထည့်ပေးလိုက်လို့ရပါတယ်ဗျာ
+        // (Note: Your Player class constructor might need to be updated to accept a String if it doesn't already!)
+        player = new Player(100, 100);
+
+        backgroundTexture = new Texture("tileset.png");
         camera = new OrthographicCamera();
 
         // 🌟 အပြောင်းအလဲ - FitViewport အစား ScalingViewport (Scaling.stretch) ကို ပြောင်းသုံးလိုက်ပါတယ်
@@ -60,6 +72,7 @@ public class GameScreen implements Screen {
         // Window size ပြောင်းရင် Viewport ကို ဆွဲဆန့်ခိုင်းလိုက်တာပါ
         viewport.update(width, height, true);
     }
+
     @Override
     public void pause() {}
 
