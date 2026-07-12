@@ -8,7 +8,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Scaling;
@@ -19,46 +19,44 @@ import com.xennus352.lostisland.LostIslandGame;
 public class CharacterSelectScreen implements Screen {
     private final LostIslandGame game;
     private SpriteBatch batch;
-    private ShapeRenderer shapeRenderer;
-
-    // Textures
-    private Texture bgTexture;
-    private Texture maleCharacterTexture;  // Male character texture
-    private Texture femaleCharacterTexture; // Female character texture
-    private Texture maleButtonTexture;
-    private Texture femaleButtonTexture;
-    private Texture continueButtonTexture;
-    private Texture buttonHoverTexture;
-    private Texture selectionBorderTexture;
-
-    // Font for text
     private BitmapFont font;
     private BitmapFont titleFont;
     private GlyphLayout glyphLayout;
 
     private OrthographicCamera camera;
     private Viewport viewport;
+    private Vector3 touchPoint;
 
     private static final float VIRTUAL_WIDTH = 640;
     private static final float VIRTUAL_HEIGHT = 480;
 
-    // Interactive Regions - BIGGER BUTTONS
-    private Rectangle btnMaleBounds;
-    private Rectangle btnFemaleBounds;
+    private Texture bgTexture;
+    private Texture continueButtonTexture;
+    private Texture buttonHoverTexture;
+
+    // Character system
+    private Texture[] characterTextures;
+    private String[] characterNames;
+    private String[] characterFolders;
+    private int selectedIndex = 0;
+    private int totalCharacters;
+
+    // Carousel state
+    private float[] characterScales;
+    private float[] targetScales;
+    private float[] currentXOffsets;
+    private float[] targetXOffsets;
+    private float characterWidth = 120f;
+    private float characterHeight = 120f;
+    private float centerX;
+    private float baseY;
+
+    private static final float ANIMATION_SPEED = 0.15f;
+    private boolean isAnimating = false;
+
     private Rectangle btnContinueBounds;
-    private Vector3 touchPoint;
-
-    // State Tracking
-    private String selectedGender = "MALE";
-    private boolean isHoveringMale = false;
-    private boolean isHoveringFemale = false;
     private boolean isHoveringContinue = false;
-
-    // Animation/Visual States
-    private float buttonScale = 1f;
-    private float targetScale = 1f;
-    private float selectionPulse = 0f;
-    private float selectionGlow = 0f;
+    private boolean isSelected = false;
 
     public CharacterSelectScreen(LostIslandGame game) {
         this.game = game;
@@ -67,30 +65,11 @@ public class CharacterSelectScreen implements Screen {
     @Override
     public void show() {
         batch = new SpriteBatch();
-        shapeRenderer = new ShapeRenderer();
-
-        // Setup fonts with larger size
         font = new BitmapFont();
-        font.getData().setScale(2f);
-
+        font.getData().setScale(1.8f);
         titleFont = new BitmapFont();
         titleFont.getData().setScale(2.5f);
-
         glyphLayout = new GlyphLayout();
-
-        // Load textures
-        bgTexture = new Texture("Background/CharacterSelectBg.png");
-
-        // Load separate character textures for male and female
-        maleCharacterTexture = new Texture("Fighter/south.png"); // Male character
-        femaleCharacterTexture = new Texture("assets/player.png"); // Female character
-
-        // Button textures
-        maleButtonTexture = createButtonTexture(Color.BLUE);
-        femaleButtonTexture = createButtonTexture(Color.PINK);
-        continueButtonTexture = createButtonTexture(Color.GREEN);
-        buttonHoverTexture = createButtonTexture(Color.YELLOW);
-        selectionBorderTexture = createButtonTexture(new Color(1, 0.8f, 0, 1));
 
         touchPoint = new Vector3();
 
@@ -98,293 +77,274 @@ public class CharacterSelectScreen implements Screen {
         viewport = new ScalingViewport(Scaling.stretch, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, camera);
         viewport.apply();
 
-        float scaleFactor = Math.min(
-            Gdx.graphics.getWidth() / 800f,
-            Gdx.graphics.getHeight() / 600f
-        );
+        centerX = VIRTUAL_WIDTH / 2f;
+        baseY = 150f;
 
-        // Position UI elements with BIGGER buttons
-        float centerX = VIRTUAL_WIDTH / 2f;
-        float buttonWidth = 180f * scaleFactor;
-        float buttonHeight = 60f * scaleFactor;
-        float buttonSpacing = 30f;
+        bgTexture = new Texture("Background/CharacterSelectionBg.png");
+        continueButtonTexture = new Texture("ui/button.png");
+        buttonHoverTexture = new Texture("ui/button.png");
 
-        // Position buttons with more spacing
-        btnMaleBounds = new Rectangle(
-            centerX - buttonWidth - buttonSpacing - 20,
-            180,
-            buttonWidth,
-            buttonHeight
-        );
+        // Character data
+        characterNames = new String[] {
+            "Warrior",
+            "Mage",
+            "Rogue",
+            "Archer",
+            "Paladin"
+        };
 
-        btnFemaleBounds = new Rectangle(
-            centerX + buttonSpacing + 20,
-            180,
-            buttonWidth,
-            buttonHeight
-        );
+        characterFolders = new String[] {
+            "Fighter",
+            "Pirate/OldCap",
+            "Pirate/Jack",
+            "Archer",
+            "Knight"
+        };
 
-        // Bigger continue button
-        btnContinueBounds = new Rectangle(
-            centerX - 120,
-            70,
-            240,
-            55
-        );
+        characterTextures = new Texture[] {
+            new Texture("Fighter/south.png"),
+            new Texture("Pirate/OldCap/south.png"),
+            new Texture("Pirate/Jack/south.png"),
+            new Texture("player.png"),
+            new Texture("p4.png")
+        };
+
+        totalCharacters = characterTextures.length;
+
+        // Initialize animation arrays
+        characterScales = new float[3];
+        targetScales = new float[3];
+        currentXOffsets = new float[3];
+        targetXOffsets = new float[3];
+
+        updateCarouselPositions(selectedIndex);
+
+        btnContinueBounds = new Rectangle(centerX - 100, 50, 200, 55);
+        isSelected = false;
     }
 
-    private Texture createButtonTexture(Color color) {
-        // In practice, load actual button images
-        return new Texture("ui/button_default.png");
+    private void updateCarouselPositions(int centerIndex) {
+        float spacing = 180f;
+        float smallScale = 1.3f;
+        float largeScale = 1.6f;
+
+        int leftIndex = (centerIndex - 1 + totalCharacters) % totalCharacters;
+        int centerIdx = centerIndex;
+        int rightIndex = (centerIndex + 1) % totalCharacters;
+
+        targetXOffsets[0] = centerX - spacing;
+        targetXOffsets[1] = centerX;
+        targetXOffsets[2] = centerX + spacing;
+
+        targetScales[0] = smallScale;
+        targetScales[1] = largeScale;
+        targetScales[2] = smallScale;
+
+        if (!isAnimating) {
+            for (int i = 0; i < 3; i++) {
+                currentXOffsets[i] = targetXOffsets[i];
+                characterScales[i] = targetScales[i];
+            }
+        }
+    }
+
+    private void animateCarousel(int newIndex) {
+        isAnimating = true;
+        float spacing = 180f;
+        float smallScale = 1.3f;
+        float largeScale = 1.6f;
+
+        targetXOffsets[0] = centerX - spacing;
+        targetXOffsets[1] = centerX;
+        targetXOffsets[2] = centerX + spacing;
+
+        targetScales[0] = smallScale;
+        targetScales[1] = largeScale;
+        targetScales[2] = smallScale;
+    }
+
+    private void updateAnimation() {
+        if (isAnimating) {
+            boolean allDone = true;
+            for (int i = 0; i < 3; i++) {
+                currentXOffsets[i] = MathUtils.lerp(currentXOffsets[i], targetXOffsets[i], ANIMATION_SPEED);
+                characterScales[i] = MathUtils.lerp(characterScales[i], targetScales[i], ANIMATION_SPEED);
+                if (Math.abs(currentXOffsets[i] - targetXOffsets[i]) > 0.5f ||
+                    Math.abs(characterScales[i] - targetScales[i]) > 0.01f) {
+                    allDone = false;
+                }
+            }
+            if (allDone) {
+                for (int i = 0; i < 3; i++) {
+                    currentXOffsets[i] = targetXOffsets[i];
+                    characterScales[i] = targetScales[i];
+                }
+                isAnimating = false;
+            }
+        }
+    }
+
+    private int[] getCurrentCharacterIndices() {
+        int leftIndex = (selectedIndex - 1 + totalCharacters) % totalCharacters;
+        int centerIdx = selectedIndex;
+        int rightIndex = (selectedIndex + 1) % totalCharacters;
+        return new int[]{leftIndex, centerIdx, rightIndex};
     }
 
     @Override
     public void render(float delta) {
-        // Update animations
-        buttonScale += (targetScale - buttonScale) * 0.1f;
-        selectionPulse += delta * 2f;
-        selectionGlow = (float) (0.5f + 0.5f * Math.sin(selectionPulse));
+        updateAnimation();
 
-        // Update camera
         camera.update();
         batch.setProjectionMatrix(camera.combined);
-        shapeRenderer.setProjectionMatrix(camera.combined);
 
-        // Clear screen
         Gdx.gl.glClearColor(0.1f, 0.1f, 0.1f, 1);
         Gdx.gl.glClear(Gdx.gl.GL_COLOR_BUFFER_BIT);
 
-        // Draw background
         batch.begin();
+
         batch.draw(bgTexture, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
 
-        // Draw character preview with larger sprites
-        drawCharacterSelection(delta);
-
-        // Draw buttons with hover effects
-        drawButton(batch, btnMaleBounds, "MALE",
-            isHoveringMale ? buttonHoverTexture : maleButtonTexture,
-            isHoveringMale ? 1.08f : 1f,
-            selectedGender.equals("MALE"));
-
-        drawButton(batch, btnFemaleBounds, "FEMALE",
-            isHoveringFemale ? buttonHoverTexture : femaleButtonTexture,
-            isHoveringFemale ? 1.08f : 1f,
-            selectedGender.equals("FEMALE"));
-
-        drawButton(batch, btnContinueBounds, "CONTINUE →",
-            isHoveringContinue ? buttonHoverTexture : continueButtonTexture,
-            isHoveringContinue ? 1.08f : 1f,
-            false);
-
-        // Draw title with selection info
-        drawTitleAndSelection();
-
-        batch.end();
-
-        // Input handling
-        handleInput();
-    }
-
-    private void drawCharacterSelection(float delta) {
-        float spriteWidth = 100f;
-        float spriteHeight = 100f;
-        float pedestalY = 145f;
-
-        // Draw male character (left)
-        float leftPedestalX = 256f - (spriteWidth / 2f);
-        drawCharacterWithSelection(leftPedestalX, pedestalY, spriteWidth, spriteHeight,
-            selectedGender.equals("MALE"), "MALE", maleCharacterTexture);
-
-        // Draw female character (right)
-        float rightPedestalX = 384f - (spriteWidth / 2f);
-        drawCharacterWithSelection(rightPedestalX, pedestalY, spriteWidth, spriteHeight,
-            selectedGender.equals("FEMALE"), "FEMALE", femaleCharacterTexture);
-    }
-
-    private void drawCharacterWithSelection(float x, float y, float width, float height,
-                                            boolean isSelected, String gender, Texture characterTexture) {
-        // Draw character sprite
-        batch.draw(characterTexture, x, y, width, height);
-
-        if (isSelected) {
-            // Draw glowing selection border
-            float borderSize = 12f;
-            float glowAlpha = 0.3f + 0.3f * selectionGlow;
-
-            // Outer glow
-            batch.setColor(1, 0.8f, 0, glowAlpha * 0.5f);
-            batch.draw(selectionBorderTexture,
-                x - borderSize, y - borderSize,
-                width + borderSize * 2, height + borderSize * 2);
-
-            // Inner glow
-            batch.setColor(1, 0.9f, 0.3f, glowAlpha);
-            batch.draw(selectionBorderTexture,
-                x - borderSize/2, y - borderSize/2,
-                width + borderSize, height + borderSize);
-
-            batch.setColor(Color.WHITE);
-
-            // Draw "SELECTED" label
-            String label = "★ SELECTED ★";
-            glyphLayout.setText(font, label);
-            float labelX = x + (width - glyphLayout.width) / 2f;
-            float labelY = y + height + 35f;
-
-            // Label background
-            batch.setColor(0, 0, 0, 0.6f);
-            batch.draw(selectionBorderTexture,
-                labelX - 15, labelY - 8,
-                glyphLayout.width + 30, glyphLayout.height + 16);
-
-            // Label text
-            batch.setColor(1, 0.8f, 0, 1);
-            font.draw(batch, label, labelX, labelY + glyphLayout.height);
-            batch.setColor(Color.WHITE);
-        }
-
-        // Draw gender label under character with appropriate color
-        String genderLabel = gender.equals("MALE") ? "♂ MALE" : "♀ FEMALE";
-        glyphLayout.setText(font, genderLabel);
-        float labelX = x + (width - glyphLayout.width) / 2f;
-        float labelY = y - 20f;
-
-        // Color the label based on gender
-        if (gender.equals("MALE")) {
-            batch.setColor(new Color(0.3f, 0.6f, 1f, 1f)); // Blue for male
-        } else {
-            batch.setColor(new Color(1f, 0.4f, 0.7f, 1f)); // Pink for female
-        }
-        font.draw(batch, genderLabel, labelX, labelY);
-        batch.setColor(Color.WHITE);
-    }
-
-    private void drawButton(SpriteBatch batch, Rectangle bounds, String text,
-                            Texture texture, float scale, boolean isSelected) {
-        float originalX = bounds.x;
-        float originalY = bounds.y;
-        float originalWidth = bounds.width;
-        float originalHeight = bounds.height;
-
-        // Apply scale effect
-        float scaledWidth = originalWidth * scale;
-        float scaledHeight = originalHeight * scale;
-        float x = originalX + (originalWidth - scaledWidth) / 2f;
-        float y = originalY + (originalHeight - scaledHeight) / 2f;
-
-        // Draw button with selection state
-        if (isSelected) {
-            batch.setColor(1, 0.8f, 0, 1);
-        } else {
-            batch.setColor(Color.WHITE);
-        }
-
-        if (texture != null) {
-            batch.draw(texture, x, y, scaledWidth, scaledHeight);
-        }
-
-        // Draw button text with shadow for better visibility
-        if (isSelected) {
-            batch.setColor(Color.BLACK);
-        } else {
-            batch.setColor(Color.BLACK);
-            // Draw shadow
-            glyphLayout.setText(font, text);
-            font.draw(batch, text,
-                bounds.x + (bounds.width - glyphLayout.width) / 2f + 2,
-                bounds.y + (bounds.height + glyphLayout.height) / 2f - 2);
-
-            batch.setColor(Color.WHITE);
-        }
-
-        // Draw main text
-        glyphLayout.setText(font, text);
-        float textX = bounds.x + (bounds.width - glyphLayout.width) / 2f;
-        float textY = bounds.y + (bounds.height + glyphLayout.height) / 2f;
-
-        // Add checkmark for selected button
-        String displayText = isSelected ? "✓ " + text : text;
-        glyphLayout.setText(font, displayText);
-
-        if (isSelected) {
-            batch.setColor(Color.BLACK);
-        } else {
-            batch.setColor(Color.WHITE);
-        }
-        font.draw(batch, displayText, textX, textY);
-
-        batch.setColor(Color.WHITE);
-    }
-
-    private void drawTitleAndSelection() {
-        // Main title
+        // Title
         titleFont.setColor(Color.WHITE);
         String title = "SELECT YOUR CHARACTER";
         glyphLayout.setText(titleFont, title);
-        float titleX = (VIRTUAL_WIDTH - glyphLayout.width) / 2f;
-        titleFont.draw(batch, title, titleX, VIRTUAL_HEIGHT - 30);
+        titleFont.draw(batch, title, (VIRTUAL_WIDTH - glyphLayout.width) / 2f, VIRTUAL_HEIGHT - 30);
 
-        // Selection status
-        String selectedText = "Selected: " + selectedGender +
-            (selectedGender.equals("MALE") ? " ♂" : " ♀");
-        glyphLayout.setText(font, selectedText);
-        float statusX = (VIRTUAL_WIDTH - glyphLayout.width) / 2f;
-        float statusY = 310f;
+        drawCharacterCarousel();
+        drawNavigationArrows();
+        drawContinueButton();
+        drawCharacterInfo();
 
-        // Status background with more padding
-        batch.setColor(0, 0, 0, 0.4f);
-        float padding = 25f;
-        batch.draw(selectionBorderTexture,
-            statusX - padding, statusY - 10,
-            glyphLayout.width + padding * 2, glyphLayout.height + 20);
+        batch.end();
+        handleInput();
+    }
 
-        // Status text with color
-        batch.setColor(selectedGender.equals("MALE") ?
-            new Color(0.3f, 0.5f, 1f, 1f) :
-            new Color(1f, 0.4f, 0.6f, 1f));
-        font.draw(batch, selectedText, statusX, statusY + glyphLayout.height);
+    private void drawCharacterCarousel() {
+        int[] indices = getCurrentCharacterIndices();
+
+        for (int i = 0; i < 3; i++) {
+            int charIndex = indices[i];
+            float scale = characterScales[i];
+            float x = currentXOffsets[i] - (characterWidth * scale) / 2f;
+            float y = baseY - (characterHeight * scale) / 2f;
+
+            if (i == 1) {
+                batch.setColor(1, 0.8f, 0.3f, 0.2f + 0.1f * (float)Math.sin(Gdx.graphics.getDeltaTime() * 3f));
+                batch.draw(characterTextures[charIndex], x - 20, y - 20,
+                    characterWidth * scale + 40, characterHeight * scale + 40);
+                batch.setColor(Color.WHITE);
+            }
+
+            batch.draw(characterTextures[charIndex], x, y,
+                characterWidth * scale, characterHeight * scale);
+        }
+    }
+
+    private void drawNavigationArrows() {
+        float arrowY = baseY + 20;
+        font.setColor(isHoveringLeftArrow() ? Color.GOLD : Color.WHITE);
+        font.draw(batch, "<", 60, arrowY);
+
+        font.setColor(isHoveringRightArrow() ? Color.GOLD : Color.WHITE);
+        glyphLayout.setText(font, ">");
+        font.draw(batch, ">", VIRTUAL_WIDTH - 60 - glyphLayout.width, arrowY);
+        font.setColor(Color.WHITE);
+    }
+
+    private void drawCharacterInfo() {
+        String name = characterNames[selectedIndex];
+        glyphLayout.setText(font, name);
+        float nameX = centerX - glyphLayout.width / 2f;
+        float nameY = baseY - 40;
+
+        batch.setColor(0, 0, 0, 0.5f);
+        batch.draw(continueButtonTexture, nameX - 20, nameY - 8,
+            glyphLayout.width + 40, glyphLayout.height + 16);
         batch.setColor(Color.WHITE);
 
-        // Add instruction text
-        String instruction = "Tap a character to select, then CONTINUE";
-        glyphLayout.setText(font, instruction);
-        float instX = (VIRTUAL_WIDTH - glyphLayout.width) / 2f;
-        float instY = 120f;
-        batch.setColor(0.5f, 0.5f, 0.5f, 0.8f);
-        font.draw(batch, instruction, instX, instY);
+        font.setColor(Color.GOLD);
+        font.draw(batch, name, nameX, nameY + glyphLayout.height);
+        font.setColor(Color.WHITE);
+    }
+
+    private void drawContinueButton() {
+        String buttonText = isSelected ? "PLAY" : "SELECT";
+        float scale = isHoveringContinue ? 1.05f : 1f;
+
+        float x = btnContinueBounds.x + (btnContinueBounds.width - btnContinueBounds.width * scale) / 2f;
+        float y = btnContinueBounds.y + (btnContinueBounds.height - btnContinueBounds.height * scale) / 2f;
+
+        batch.setColor(isHoveringContinue ? new Color(1, 0.9f, 0.5f, 1) :
+            isSelected ? new Color(0.2f, 0.8f, 0.2f, 1) : Color.WHITE);
+        batch.draw(continueButtonTexture, x, y,
+            btnContinueBounds.width * scale, btnContinueBounds.height * scale);
         batch.setColor(Color.WHITE);
+
+        glyphLayout.setText(font, buttonText);
+        float textX = btnContinueBounds.x + (btnContinueBounds.width - glyphLayout.width) / 2f;
+        float textY = btnContinueBounds.y + (btnContinueBounds.height + glyphLayout.height) / 2f;
+
+        font.setColor(Color.BLACK);
+        font.draw(batch, buttonText, textX + 2, textY - 2);
+        font.setColor(isSelected ? Color.GREEN : Color.WHITE);
+        font.draw(batch, buttonText, textX, textY);
+        font.setColor(Color.WHITE);
+    }
+
+    private boolean isHoveringLeftArrow() {
+        return touchPoint.x > 20 && touchPoint.x < 100 &&
+            touchPoint.y > baseY - 20 && touchPoint.y < baseY + 60;
+    }
+
+    private boolean isHoveringRightArrow() {
+        return touchPoint.x > VIRTUAL_WIDTH - 100 && touchPoint.x < VIRTUAL_WIDTH - 20 &&
+            touchPoint.y > baseY - 20 && touchPoint.y < baseY + 60;
     }
 
     private void handleInput() {
-        // Mouse/Touch position for hover detection
         float mouseX = Gdx.input.getX();
         float mouseY = Gdx.input.getY();
         touchPoint.set(mouseX, mouseY, 0);
         viewport.unproject(touchPoint);
 
-        // Update hover states
-        isHoveringMale = btnMaleBounds.contains(touchPoint.x, touchPoint.y);
-        isHoveringFemale = btnFemaleBounds.contains(touchPoint.x, touchPoint.y);
         isHoveringContinue = btnContinueBounds.contains(touchPoint.x, touchPoint.y);
 
-        // Click handling
         if (Gdx.input.justTouched()) {
-            if (isHoveringMale) {
-                selectedGender = "MALE";
-                targetScale = 0.85f;
-                Gdx.app.log("CharacterSelect", "Male Chosen");
-            } else if (isHoveringFemale) {
-                selectedGender = "FEMALE";
-                targetScale = 0.85f;
-                Gdx.app.log("CharacterSelect", "Female Chosen");
-            } else if (isHoveringContinue) {
-                Gdx.app.log("CharacterSelect", "Continuing with: " + selectedGender);
-                game.setScreen(new GameScreen(game, selectedGender));
+            // Only allow navigation and selection if NOT already selected
+            if (!isSelected) {
+                if (isHoveringLeftArrow()) {
+                    selectedIndex = (selectedIndex - 1 + totalCharacters) % totalCharacters;
+                    animateCarousel(selectedIndex);
+                    return;
+                }
+
+                if (isHoveringRightArrow()) {
+                    selectedIndex = (selectedIndex + 1) % totalCharacters;
+                    animateCarousel(selectedIndex);
+                    return;
+                }
+
+                float centerXPos = currentXOffsets[1];
+                float centerYPos = baseY;
+                float centerHalfWidth = characterWidth * characterScales[1] / 2f;
+                float centerHalfHeight = characterHeight * characterScales[1] / 2f;
+
+                if (touchPoint.x > centerXPos - centerHalfWidth &&
+                    touchPoint.x < centerXPos + centerHalfWidth &&
+                    touchPoint.y > centerYPos - centerHalfHeight &&
+                    touchPoint.y < centerYPos + centerHalfHeight) {
+                    isSelected = true;
+                    return;
+                }
+            }
+
+            // PLAY button - only works when selected
+            if (isHoveringContinue && isSelected) {
+                game.setScreen(new GameScreen(game, characterFolders[selectedIndex], characterNames[selectedIndex]));
             }
         }
     }
-
     @Override
     public void resize(int width, int height) {
         viewport.update(width, height, true);
@@ -404,16 +364,13 @@ public class CharacterSelectScreen implements Screen {
     @Override
     public void dispose() {
         batch.dispose();
-        shapeRenderer.dispose();
         font.dispose();
         titleFont.dispose();
         bgTexture.dispose();
-        if (maleCharacterTexture != null) maleCharacterTexture.dispose();
-        if (femaleCharacterTexture != null) femaleCharacterTexture.dispose();
-        if (maleButtonTexture != null) maleButtonTexture.dispose();
-        if (femaleButtonTexture != null) femaleButtonTexture.dispose();
-        if (continueButtonTexture != null) continueButtonTexture.dispose();
-        if (buttonHoverTexture != null) buttonHoverTexture.dispose();
-        if (selectionBorderTexture != null) selectionBorderTexture.dispose();
+        continueButtonTexture.dispose();
+        buttonHoverTexture.dispose();
+        for (Texture tex : characterTextures) {
+            if (tex != null) tex.dispose();
+        }
     }
 }
