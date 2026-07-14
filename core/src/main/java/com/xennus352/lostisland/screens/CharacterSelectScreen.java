@@ -32,7 +32,6 @@ public class CharacterSelectScreen implements Screen {
 
     private Texture bgTexture;
     private Texture continueButtonTexture;
-    private Texture buttonHoverTexture;
 
     // Character system
     private Texture[] characterTextures;
@@ -82,7 +81,6 @@ public class CharacterSelectScreen implements Screen {
 
         bgTexture = new Texture("Background/CharacterSelectionBg.png");
         continueButtonTexture = new Texture("ui/button.png");
-        buttonHoverTexture = new Texture("ui/button.png");
 
         // Character data
         characterNames = new String[] {
@@ -117,20 +115,16 @@ public class CharacterSelectScreen implements Screen {
         currentXOffsets = new float[3];
         targetXOffsets = new float[3];
 
-        updateCarouselPositions(selectedIndex);
+        updateCarouselPositions();
 
         btnContinueBounds = new Rectangle(centerX - 100, 50, 200, 55);
         isSelected = false;
     }
 
-    private void updateCarouselPositions(int centerIndex) {
+    private void updateCarouselPositions() {
         float spacing = 180f;
         float smallScale = 1.3f;
         float largeScale = 1.6f;
-
-        int leftIndex = (centerIndex - 1 + totalCharacters) % totalCharacters;
-        int centerIdx = centerIndex;
-        int rightIndex = (centerIndex + 1) % totalCharacters;
 
         targetXOffsets[0] = centerX - spacing;
         targetXOffsets[1] = centerX;
@@ -368,7 +362,6 @@ public class CharacterSelectScreen implements Screen {
         titleFont.dispose();
         bgTexture.dispose();
         continueButtonTexture.dispose();
-        buttonHoverTexture.dispose();
         for (Texture tex : characterTextures) {
             if (tex != null) tex.dispose();
         }

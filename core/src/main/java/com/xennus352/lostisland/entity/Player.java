@@ -24,11 +24,47 @@ public class Player {
     private boolean isMoving = false;
 
     private float x, y;
-    private float speed = 10f;
-    private static final float VIRTUAL_WIDTH = 640;
-    private static final float VIRTUAL_HEIGHT = 480;
+    private float speed = 15f;
+    private float sprintMultiplier = 3f;
+    private boolean isSprinting = false;
+    private float worldWidth = 1600f;
+    private float worldHeight = 1600f;
+    private float colWidth = 14f;
+    private float colHeight = 14f;
+
+    public interface CollisionChecker {
+        boolean isBlocked(int tileX, int tileY);
+    }
+    private CollisionChecker collisionChecker;
+
+    public interface TileSpeedModifier {
+        float getModifier(int tileX, int tileY);
+    }
+    private TileSpeedModifier tileSpeedModifier;
 
     private final String characterFolder;
+
+    public void setCollisionChecker(CollisionChecker checker) {
+        this.collisionChecker = checker;
+    }
+
+    public void setTileSpeedModifier(TileSpeedModifier modifier) {
+        this.tileSpeedModifier = modifier;
+    }
+
+    public void setWorldBounds(float width, float height) {
+        this.worldWidth = width;
+        this.worldHeight = height;
+    }
+
+    public boolean isSprinting() {
+        return isSprinting;
+    }
+
+    public void setPosition(float x, float y) {
+        this.x = x;
+        this.y = y;
+    }
 
     public Player(float startX, float startY, String characterFolder) {
         this.x = startX;
@@ -97,6 +133,8 @@ public class Player {
             stateTime = 0f;
         }
 
+        isSprinting = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT) || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT);
+
         if (isAttacking) {
             String dir = getDirectionKey();
             Animation<TextureRegion> anim = attackAnimations.get(dir);
@@ -113,8 +151,8 @@ public class Player {
             }
         }
 
-        x = MathUtils.clamp(x, 0, VIRTUAL_WIDTH - currentFrame.getRegionWidth());
-        y = MathUtils.clamp(y, 0, VIRTUAL_HEIGHT - currentFrame.getRegionHeight());
+        x = MathUtils.clamp(x, 0, worldWidth - currentFrame.getRegionWidth());
+        y = MathUtils.clamp(y, 0, worldHeight - currentFrame.getRegionHeight());
     }
 
     private String getDirectionKey() {
@@ -144,9 +182,6 @@ public class Player {
         dx /= len;
         dy /= len;
 
-        x += dx * speed * delta;
-        y += dy * speed * delta;
-
         // Determine direction
         if (up && right)
             lastDirection = "NE";
@@ -165,7 +200,52 @@ public class Player {
         else if (right)
             lastDirection = "E";
 
+        // Compute speed: base → sprint → tile modifier
+        float currentSpeed = isSprinting ? speed * sprintMultiplier : speed;
+        if (tileSpeedModifier != null) {
+            int tx = (int)Math.floor((x + colOffsetX() + colWidth / 2f) / 32);
+            int ty = (int)Math.floor((y + colOffsetY() + colHeight / 2f) / 32);
+            currentSpeed *= tileSpeedModifier.getModifier(tx, ty);
+        }
+        float newX = x + dx * currentSpeed * delta;
+        float newY = y + dy * currentSpeed * delta;
+
+        // Use centered hitbox for collision
+        float cx = x + colOffsetX();
+        float cy = y + colOffsetY();
+        float newCx = newX + colOffsetX();
+        float newCy = newY + colOffsetY();
+
+        if (collisionChecker != null) {
+            if (!isBlockedAt(newCx, cy)) x = newX;
+            if (!isBlockedAt(cx, newCy)) y = newY;
+        } else {
+            x = newX;
+            y = newY;
+        }
+
         return true;
+    }
+
+    private float colOffsetX() {
+        return (currentFrame.getRegionWidth() - colWidth) / 2f;
+    }
+    private float colOffsetY() {
+        return 0f;
+    }
+
+    private boolean isBlockedAt(float px, float py) {
+        if (collisionChecker == null) return false;
+        int startTx = (int)Math.floor(px / 32);
+        int endTx   = (int)Math.floor((px + colWidth - 1) / 32);
+        int startTy = (int)Math.floor(py / 32);
+        int endTy   = (int)Math.floor((py + colHeight - 1) / 32);
+        for (int tx = startTx; tx <= endTx; tx++) {
+            for (int ty = startTy; ty <= endTy; ty++) {
+                if (collisionChecker.isBlocked(tx, ty)) return true;
+            }
+        }
+        return false;
     }
 
     public void draw(SpriteBatch batch) {
@@ -174,5 +254,23 @@ public class Player {
 
     public void dispose() {
         for (Texture t : allTextures) t.dispose();
+    }
+
+    // Player.java ထဲက class အောက်ခြေနားမှာ ဒီကုဒ်လေး ထည့်ပေးပါ
+    public float getX() {
+        return x;
+    }
+
+    public float getY() {
+        return y;
+    }
+
+    // Player ရဲ့ လက်ရှိပုံ အကျယ်နဲ့ အမြင့်ကို ယူဖို့ (Camera ကို အလယ်တည့်တည့် ညှိချင်ရင် သုံးရအောင်ပါ)
+    public float getWidth() {
+        return currentFrame != null ? currentFrame.getRegionWidth() : 0;
+    }
+
+    public float getHeight() {
+        return currentFrame != null ? currentFrame.getRegionHeight() : 0;
     }
 }
