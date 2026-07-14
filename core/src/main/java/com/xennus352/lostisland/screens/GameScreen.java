@@ -1,8 +1,11 @@
 package com.xennus352.lostisland.screens;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
@@ -38,9 +41,11 @@ public class GameScreen implements Screen {
     private int mapPixelHeight;
 
     private ShapeRenderer debugRenderer;
+    private ShapeRenderer hudRenderer;
+    private BitmapFont hudFont;
 
     private static final String[] SOLID_LAYERS = {"Tree", "House"};
-    private static final float ZOOM = 1f;
+    private static final float ZOOM = 0.8f;
 
     public GameScreen(LostIslandGame game, String characterPath, String characterName) {
         this.game = game;
@@ -63,6 +68,8 @@ public class GameScreen implements Screen {
         mapRenderer = new OrthogonalTiledMapRenderer(map, 1f);
 
         debugRenderer = new ShapeRenderer();
+        hudRenderer = new ShapeRenderer();
+        hudFont = new BitmapFont();
 
         // Player ကို စတင်မယ့်နေရာမှာ နေရာချခြင်း
         player = new Player(400, 300, characterPath);
@@ -192,7 +199,14 @@ public class GameScreen implements Screen {
             TiledMapTileLayer layer = (TiledMapTileLayer) map.getLayers().get(layerName);
             if (layer == null) continue;
             TiledMapTileLayer.Cell cell = layer.getCell(tileX, tileY);
-            if (cell != null && cell.getTile() != null) return true;
+            if (cell == null || cell.getTile() == null) continue;
+            // On the House layer only actual houses (GID 26–34) block
+            if (layerName.equals("House")) {
+                int gid = cell.getTile().getId();
+                if (gid >= 26 && gid <= 34) return true;
+            } else {
+                return true;
+            }
         }
         return false;
     }
@@ -230,6 +244,9 @@ public class GameScreen implements Screen {
 
         // ၃။ Draw red outlines on collision tiles
         drawCollisionDebug();
+
+        // ၄။ Draw HUD (HP / EXP bars)
+        drawHUD();
     }
 
     private void drawCollisionDebug() {
@@ -250,6 +267,11 @@ public class GameScreen implements Screen {
                     }
                     TiledMapTileLayer.Cell cell = layer.getCell(tx, ty);
                     if (cell != null && cell.getTile() != null) {
+                        // On the House layer, only mark actual houses (GID 26–34)
+                        if (layerName.equals("House")) {
+                            int gid = cell.getTile().getId();
+                            if (gid < 26 || gid > 34) continue;
+                        }
                         debugRenderer.rect(tx * 32, ty * 32, 32, 32);
                     }
                 }
@@ -257,6 +279,101 @@ public class GameScreen implements Screen {
         }
 
         debugRenderer.end();
+    }
+
+    private void drawHUD() {
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+
+        OrthographicCamera hudCam = new OrthographicCamera(screenW, screenH);
+        hudCam.position.set(screenW / 2f, screenH / 2f, 0);
+        hudCam.update();
+
+        hudRenderer.setProjectionMatrix(hudCam.combined);
+
+        // ── Layout ──
+        int margin = 16;
+        int padding = 8;
+        float barW = 180, barH = 16;
+        float labelW = 50;
+        float rightPad = 10;
+        float panelX = margin;
+        float panelW = margin + labelW + padding + barW + padding + rightPad;
+        float innerH = barH * 2 + padding * 2 + 20;
+        float panelY = screenH - margin - innerH;
+
+        // ── Panel background ──
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0, 0, 0, 0.55f);
+        hudRenderer.rect(panelX, panelY, panelW, innerH);
+        hudRenderer.end();
+
+        // ── Panel border ──
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.5f, 0.5f, 0.5f, 0.8f);
+        hudRenderer.rect(panelX, panelY, panelW, innerH);
+        hudRenderer.end();
+
+        float labelX = panelX + margin;
+        float barX  = labelX + labelW;
+        float contentY = panelY + padding + 10;
+
+        // ── HP bar ──
+        float hpY = contentY + barH + padding;
+        float hpFill = (float)player.getHealth() / player.getMaxHealth();
+
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0.15f, 0.15f, 0.15f, 1);
+        hudRenderer.rect(barX, hpY, barW, barH);
+
+        float hpR = 0.8f + 0.2f * (1 - hpFill);
+        float hpG = 0.2f * hpFill;
+        hudRenderer.setColor(hpR, hpG, 0.1f, 1);
+        hudRenderer.rect(barX, hpY, barW * hpFill, barH);
+        hudRenderer.end();
+
+        // HP bar border
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.4f, 0.4f, 0.4f, 1);
+        hudRenderer.rect(barX, hpY, barW, barH);
+        hudRenderer.end();
+
+        // ── EXP bar ──
+        float expY = contentY;
+        float expFill = (float)player.getExp() / Math.max(player.getExpToNext(), 1);
+
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0.15f, 0.15f, 0.15f, 1);
+        hudRenderer.rect(barX, expY, barW, barH);
+
+        float expR = 0.2f, expG = 0.3f + 0.5f * expFill, expB = 0.8f;
+        hudRenderer.setColor(expR, expG, expB, 1);
+        hudRenderer.rect(barX, expY, barW * expFill, barH);
+        hudRenderer.end();
+
+        // EXP bar border
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.4f, 0.4f, 0.4f, 1);
+        hudRenderer.rect(barX, expY, barW, barH);
+        hudRenderer.end();
+
+        // ── Text labels ──
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        hudFont.setColor(0.95f, 0.95f, 0.95f, 1);
+
+        float textY = hpY + (barH + 4);
+        hudFont.draw(batch, "HP", labelX, textY);
+        hudFont.draw(batch, player.getHealth() + "/" + player.getMaxHealth(), barX + barW - 50, textY);
+
+        textY = expY + (barH + 4);
+        hudFont.draw(batch, "EXP", labelX, textY);
+        hudFont.draw(batch, player.getExp() + "/" + player.getExpToNext(), barX + barW - 50, textY);
+
+        // Level indicator (below EXP bar)
+        hudFont.setColor(1, 0.85f, 0.2f, 1);
+        hudFont.draw(batch, "Lv." + player.getLevel(), barX, expY - 2);
+        batch.end();
     }
 
     @Override
@@ -282,5 +399,7 @@ public class GameScreen implements Screen {
         if (map != null) map.dispose();
         if (mapRenderer != null) mapRenderer.dispose();
         if (debugRenderer != null) debugRenderer.dispose();
+        if (hudRenderer != null) hudRenderer.dispose();
+        if (hudFont != null) hudFont.dispose();
     }
 }

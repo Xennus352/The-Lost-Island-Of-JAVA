@@ -31,6 +31,38 @@ public class Player {
     private float worldHeight = 1600f;
     private float colWidth = 14f;
     private float colHeight = 14f;
+    private float spriteScale = 0.6f;
+
+    private int health = 100;
+    private int maxHealth = 100;
+    private int exp = 0;
+    private int expToNext = 100;
+    private int level = 1;
+
+    public int getHealth() { return health; }
+    public int getMaxHealth() { return maxHealth; }
+    public int getExp() { return exp; }
+    public int getExpToNext() { return expToNext; }
+    public int getLevel() { return level; }
+
+    public void takeDamage(int amount) {
+        health = Math.max(0, health - amount);
+    }
+
+    public void heal(int amount) {
+        health = Math.min(maxHealth, health + amount);
+    }
+
+    public void addExp(int amount) {
+        exp += amount;
+        while (exp >= expToNext && level < 99) {
+            exp -= expToNext;
+            level++;
+            expToNext = (int)(expToNext * 1.2f);
+            maxHealth += 10;
+            health = maxHealth;
+        }
+    }
 
     public interface CollisionChecker {
         boolean isBlocked(int tileX, int tileY);
@@ -151,8 +183,8 @@ public class Player {
             }
         }
 
-        x = MathUtils.clamp(x, 0, worldWidth - currentFrame.getRegionWidth());
-        y = MathUtils.clamp(y, 0, worldHeight - currentFrame.getRegionHeight());
+        x = MathUtils.clamp(x, 0, worldWidth - currentFrame.getRegionWidth() * spriteScale);
+        y = MathUtils.clamp(y, 0, worldHeight - currentFrame.getRegionHeight() * spriteScale);
     }
 
     private String getDirectionKey() {
@@ -228,7 +260,7 @@ public class Player {
     }
 
     private float colOffsetX() {
-        return (currentFrame.getRegionWidth() - colWidth) / 2f;
+        return (currentFrame.getRegionWidth() * spriteScale - colWidth) / 2f;
     }
     private float colOffsetY() {
         return 0f;
@@ -249,7 +281,9 @@ public class Player {
     }
 
     public void draw(SpriteBatch batch) {
-        batch.draw(currentFrame, x, y);
+        float w = currentFrame.getRegionWidth() * spriteScale;
+        float h = currentFrame.getRegionHeight() * spriteScale;
+        batch.draw(currentFrame, x, y, w, h);
     }
 
     public void dispose() {
