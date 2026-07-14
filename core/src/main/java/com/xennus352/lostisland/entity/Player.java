@@ -44,6 +44,9 @@ public class Player {
     public int getExp() { return exp; }
     public int getExpToNext() { return expToNext; }
     public int getLevel() { return level; }
+    public boolean isAttacking() { return isAttacking; }
+    public String getDirectionKey() { return lastDirection; }
+    public int getAttackDamage() { return 20; }
 
     public void takeDamage(int amount) {
         health = Math.max(0, health - amount);
@@ -185,10 +188,6 @@ public class Player {
 
         x = MathUtils.clamp(x, 0, worldWidth - currentFrame.getRegionWidth() * spriteScale);
         y = MathUtils.clamp(y, 0, worldHeight - currentFrame.getRegionHeight() * spriteScale);
-    }
-
-    private String getDirectionKey() {
-        return lastDirection;
     }
 
     private boolean handleMovement(float delta) {

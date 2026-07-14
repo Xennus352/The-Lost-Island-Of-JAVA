@@ -1,27 +1,32 @@
 package com.xennus352.lostisland.screens;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
 import com.badlogic.gdx.maps.tiled.renderers.OrthogonalTiledMapRenderer;
 import com.badlogic.gdx.maps.tiled.TiledMap;
 import com.badlogic.gdx.maps.tiled.TmxMapLoader;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.xennus352.lostisland.LostIslandGame;
+import com.xennus352.lostisland.entity.NPC;
 import com.xennus352.lostisland.entity.Player;
 
 public class GameScreen implements Screen {
 
-    // 🎥 ဂိမ်းရဲ့ ကင်မရာ view size
     private static final float WORLD_WIDTH = 800f;
     private static final float WORLD_HEIGHT = 600f;
 
@@ -31,6 +36,9 @@ public class GameScreen implements Screen {
 
     private SpriteBatch batch;
     private Player player;
+    private NPC healerNpc;
+    private boolean wasPlayerAttacking = false;
+    private boolean isGameOver = false;
 
     private OrthographicCamera camera;
     private Viewport viewport;
@@ -44,8 +52,37 @@ public class GameScreen implements Screen {
     private ShapeRenderer hudRenderer;
     private BitmapFont hudFont;
 
+    private FrameBuffer fbo;
+    private TextureRegion fboRegion;
+    private OrthographicCamera screenCam;
+
     private static final String[] SOLID_LAYERS = {"Tree", "House"};
     private static final float ZOOM = 0.8f;
+
+    private Array<FloatingText> floatingTexts = new Array<>();
+    private GlyphLayout textLayout = new GlyphLayout();
+
+    private boolean dialogueOpen = false;
+    private int dialoguePage = 0;
+    private String[] dialogueLines = null;
+    private NPC dialogueNpc = null;
+
+    private boolean showMenu = false;
+    private boolean clickConsumed = false;
+
+    private static class FloatingText {
+        String text;
+        float x, y;
+        float timer;
+        Color color;
+        FloatingText(String text, float x, float y, Color color) {
+            this.text = text;
+            this.x = x;
+            this.y = y;
+            this.timer = 1.2f;
+            this.color = color;
+        }
+    }
 
     public GameScreen(LostIslandGame game, String characterPath, String characterName) {
         this.game = game;
@@ -61,33 +98,32 @@ public class GameScreen implements Screen {
         viewport = new FitViewport(WORLD_WIDTH, WORLD_HEIGHT, camera);
         viewport.apply();
 
-        // 🗺️ updated to load Village.tmx instead of island.tmx
         map = new TmxMapLoader().load("Maps/Village.tmx");
-
-        // မြေပုံအကွက်တွေ အချိုးအစားမပျက်စေဖို့ unitScale ကို 1f ထားပါတယ်
         mapRenderer = new OrthogonalTiledMapRenderer(map, 1f);
 
         debugRenderer = new ShapeRenderer();
         hudRenderer = new ShapeRenderer();
         hudFont = new BitmapFont();
 
-        // Player ကို စတင်မယ့်နေရာမှာ နေရာချခြင်း
+        screenCam = new OrthographicCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        screenCam.position.set(Gdx.graphics.getWidth() / 2f, Gdx.graphics.getHeight() / 2f, 0);
+        screenCam.update();
+        fbo = new FrameBuffer(Pixmap.Format.RGBA8888, Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), false);
+        fboRegion = new TextureRegion(fbo.getColorBufferTexture());
+        fboRegion.flip(false, true);
+
         player = new Player(400, 300, characterPath);
 
-        // Store map dimensions for camera clamping
         mapPixelWidth = map.getProperties().get("width", Integer.class) * 32;
         mapPixelHeight = map.getProperties().get("height", Integer.class) * 32;
         player.setWorldBounds(mapPixelWidth, mapPixelHeight);
 
         camera.zoom = ZOOM;
 
-        // Set up collision detection (tile-coordinate based)
-        // Street tiles override solid layers — roads are always walkable
-        // House layer: only block actual houses (GID 26–34, House.tsx / VillageHouse.png),
-        //              not bridge/filler tiles (GID 35–46, House1.tsx / VillageHouse2.png)
         TiledMapTileLayer streetLayer = (TiledMapTileLayer) map.getLayers().get("Street");
         System.out.println("[DEBUG] Street layer found: " + (streetLayer != null));
-        player.setCollisionChecker((tileX, tileY) -> {
+
+        Player.CollisionChecker collisionChecker = (tileX, tileY) -> {
             if (streetLayer != null) {
                 TiledMapTileLayer.Cell streetCell = streetLayer.getCell(tileX, tileY);
                 if (streetCell != null && streetCell.getTile() != null) return false;
@@ -97,7 +133,6 @@ public class GameScreen implements Screen {
                 if (layer == null) continue;
                 TiledMapTileLayer.Cell cell = layer.getCell(tileX, tileY);
                 if (cell == null || cell.getTile() == null) continue;
-                // On the House layer only actual houses (GID 26–34) block
                 if (layerName.equals("House")) {
                     int gid = cell.getTile().getId();
                     if (gid >= 26 && gid <= 34) return true;
@@ -106,9 +141,9 @@ public class GameScreen implements Screen {
                 }
             }
             return false;
-        });
+        };
+        player.setCollisionChecker(collisionChecker);
 
-        // Slow down on Stream / River tiles, and on bridge tiles (House1, GID 35–46)
         final String[] slowLayers = {"Stream", "River"};
         player.setTileSpeedModifier((tileX, tileY) -> {
             for (String name : slowLayers) {
@@ -128,8 +163,18 @@ public class GameScreen implements Screen {
             return 1f;
         });
 
-        // Move player to a safe spawn if current position is blocked
         findSafeSpawn();
+
+        healerNpc = new NPC(player.getX() + 100, player.getY() + 50, "Healer", player, "Healer");
+        healerNpc.setCollisionChecker(collisionChecker);
+        healerNpc.setWorldBounds(mapPixelWidth, mapPixelHeight);
+        healerNpc.setDialogue(new String[]{
+            "Greetings, traveler.",
+            "I am the healer of this village.",
+            "Beware of the dangers lurking outside.",
+            "May the light guide your path."
+        });
+        findSafeNpcSpawn();
 
         System.out.println("Selected Character : " + characterName);
     }
@@ -138,12 +183,10 @@ public class GameScreen implements Screen {
         TiledMapTileLayer ground = (TiledMapTileLayer) map.getLayers().get("Ground");
         if (ground == null) return;
 
-        // First check if current spawn (400, 300) is already safe
         int tx = (int)Math.floor(player.getX() / 32);
         int ty = (int)Math.floor(player.getY() / 32);
         if (!isTileBlocked(tx, ty) && isAreaClear(tx, ty, 3)) return;
 
-        // Find the most open area (most clear tiles in a 5x5 radius)
         int bestX = -1, bestY = -1, bestScore = -1;
         for (int y = 0; y < ground.getHeight(); y++) {
             for (int x = 0; x < ground.getWidth(); x++) {
@@ -188,8 +231,26 @@ public class GameScreen implements Screen {
         return true;
     }
 
+    private void findSafeNpcSpawn() {
+        int tx = (int)Math.floor(healerNpc.getX() / 32);
+        int ty = (int)Math.floor(healerNpc.getY() / 32);
+        if (!isTileBlocked(tx, ty)) return;
+
+        TiledMapTileLayer ground = (TiledMapTileLayer) map.getLayers().get("Ground");
+        if (ground == null) return;
+
+        for (int y = 0; y < ground.getHeight(); y++) {
+            for (int x = 0; x < ground.getWidth(); x++) {
+                if (ground.getCell(x, y) == null || ground.getCell(x, y).getTile() == null)
+                    continue;
+                if (isTileBlocked(x, y)) continue;
+                healerNpc.setPosition(x * 32, y * 32);
+                return;
+            }
+        }
+    }
+
     private boolean isTileBlocked(int tileX, int tileY) {
-        // Street tiles override all solid layers
         TiledMapTileLayer street = (TiledMapTileLayer) map.getLayers().get("Street");
         if (street != null) {
             TiledMapTileLayer.Cell sc = street.getCell(tileX, tileY);
@@ -200,7 +261,6 @@ public class GameScreen implements Screen {
             if (layer == null) continue;
             TiledMapTileLayer.Cell cell = layer.getCell(tileX, tileY);
             if (cell == null || cell.getTile() == null) continue;
-            // On the House layer only actual houses (GID 26–34) block
             if (layerName.equals("House")) {
                 int gid = cell.getTile().getId();
                 if (gid >= 26 && gid <= 34) return true;
@@ -213,40 +273,383 @@ public class GameScreen implements Screen {
 
     @Override
     public void render(float delta) {
-        // Player ရဲ့ ရွေ့လျားမှုကို Update လုပ်မယ်
-        player.update(delta);
+        clickConsumed = false;
 
-        // 🎥 ကင်မရာကို Player ရဲ့ ဗဟိုချက်ဆီ လိုက်ခိုင်းခြင်း
+        if (!isGameOver && !dialogueOpen) {
+            player.update(delta);
+            healerNpc.update(delta);
+
+            if (player.getHealth() <= 0) {
+                isGameOver = true;
+            }
+        } else if (dialogueOpen && !isGameOver) {
+            healerNpc.update(delta);
+            if (healerNpc.isHostile() || !healerNpc.isAlive()) dialogueOpen = false;
+        }
+
         float playerCenterX = player.getX() + (player.getWidth() / 2f);
         float playerCenterY = player.getY() + (player.getHeight() / 2f);
 
-        // Clamp camera so no black borders are visible outside the map
         float halfViewW = (camera.viewportWidth * camera.zoom) / 2f;
         float halfViewH = (camera.viewportHeight * camera.zoom) / 2f;
         float camX = MathUtils.clamp(playerCenterX, halfViewW, mapPixelWidth - halfViewW);
         float camY = MathUtils.clamp(playerCenterY, halfViewH, mapPixelHeight - halfViewH);
-
         camera.position.set(camX, camY, 0);
         camera.update();
 
-        // နောက်ခံ screen ကို သန့်ရှင်းပေးခြင်း
+        if (!isGameOver) {
+            if (player.isAttacking() && !wasPlayerAttacking) {
+                if (isNpcInPlayerAttackRange()) {
+                    int dmg = player.getAttackDamage();
+                    boolean killed = healerNpc.takeDamage(dmg);
+                    float nx = healerNpc.getX() + healerNpc.getWidth() * 0.3f;
+                    float ny = healerNpc.getY() + healerNpc.getHeight() * 0.6f;
+                    floatingTexts.add(new FloatingText("-" + dmg, nx, ny, Color.RED));
+                    if (killed) {
+                        player.addExp(30);
+                        floatingTexts.add(new FloatingText("+30 EXP", nx + 15, ny + 10, Color.YELLOW));
+                    }
+                }
+            }
+            wasPlayerAttacking = player.isAttacking();
+
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+                if (dialogueOpen) {
+                    dialogueOpen = false;
+                } else if (isPlayerNearNpc() && healerNpc.isAlive() && !healerNpc.isHostile()) {
+                    dialogueOpen = true;
+                    dialoguePage = 0;
+                    dialogueLines = healerNpc.getDialogue();
+                    dialogueNpc = healerNpc;
+                }
+            }
+
+            if (Gdx.input.isKeyJustPressed(Input.Keys.R) || Gdx.input.isKeyJustPressed(Input.Keys.M)) {
+                showMenu = true;
+            }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+                if (dialogueOpen) dialogueOpen = false;
+                else showMenu = !showMenu;
+            }
+
+            for (int i = floatingTexts.size - 1; i >= 0; i--) {
+                floatingTexts.get(i).timer -= delta;
+                if (floatingTexts.get(i).timer <= 0) floatingTexts.removeIndex(i);
+            }
+        }
+
+        boolean overlay = dialogueOpen || isGameOver || showMenu;
+
+        if (overlay) {
+            int w = Gdx.graphics.getWidth();
+            int h = Gdx.graphics.getHeight();
+            if (fbo.getWidth() != w || fbo.getHeight() != h) {
+                fbo.dispose();
+                fbo = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
+                fboRegion = new TextureRegion(fbo.getColorBufferTexture());
+                fboRegion.flip(false, true);
+                screenCam = new OrthographicCamera(w, h);
+                screenCam.position.set(w / 2f, h / 2f, 0);
+                screenCam.update();
+            }
+            fbo.begin();
+        }
+
         ScreenUtils.clear(0.1f, 0.1f, 0.15f, 1);
 
-        // ၁။ Tiled မြေပုံကို အရင်ဆွဲမယ်
         mapRenderer.setView(camera);
         mapRenderer.render();
 
-        // ၂။ Player ကို မြေပုံအပေါ်ထပ်ကနေ ဆွဲမယ်
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
         player.draw(batch);
+        healerNpc.draw(batch);
+        healerNpc.drawName(batch, hudFont);
+
+        for (FloatingText ft : floatingTexts) {
+            float alpha = Math.max(0, ft.timer / 1.2f);
+            float rise = (1f - alpha) * 25f;
+            hudFont.setColor(ft.color.r, ft.color.g, ft.color.b, alpha);
+            textLayout.setText(hudFont, ft.text);
+            hudFont.draw(batch, ft.text, ft.x - textLayout.width / 2f, ft.y + rise);
+        }
         batch.end();
 
-        // ၃။ Draw red outlines on collision tiles
+        debugRenderer.setProjectionMatrix(camera.combined);
+        debugRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        healerNpc.drawHpBar(debugRenderer);
+        debugRenderer.end();
+
         drawCollisionDebug();
 
-        // ၄။ Draw HUD (HP / EXP bars)
+        if (overlay) {
+            fbo.end();
+
+            int w = Gdx.graphics.getWidth();
+            int h = Gdx.graphics.getHeight();
+            ScreenUtils.clear(0, 0, 0, 1);
+
+            screenCam = new OrthographicCamera(w, h);
+            screenCam.position.set(w / 2f, h / 2f, 0);
+            screenCam.update();
+
+            batch.setProjectionMatrix(screenCam.combined);
+            batch.begin();
+            batch.setColor(1, 1, 1, 0.1f);
+            for (int ox = -2; ox <= 2; ox++) {
+                for (int oy = -2; oy <= 2; oy++) {
+                    batch.draw(fboRegion, ox, oy, w, h);
+                }
+            }
+            batch.setColor(0.15f, 0.15f, 0.2f, 0.55f);
+            batch.draw(fboRegion, 0, 0, w, h);
+            batch.setColor(Color.WHITE);
+            batch.end();
+        }
+
         drawHUD();
+
+        if (dialogueOpen) drawDialogue();
+        if (showMenu && !isGameOver && !dialogueOpen) drawPauseMenu();
+        if (isGameOver) drawGameOver();
+    }
+
+    private void drawGameOver() {
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+
+        OrthographicCamera hudCam = new OrthographicCamera(screenW, screenH);
+        hudCam.position.set(screenW / 2f, screenH / 2f, 0);
+        hudCam.update();
+
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        hudFont.setColor(1, 0.2f, 0.2f, 1);
+        String title = "GAME OVER";
+        textLayout.setText(hudFont, title);
+        hudFont.draw(batch, title, (screenW - textLayout.width) / 2f, screenH / 2f + 40);
+
+        hudFont.setColor(0.8f, 0.8f, 0.8f, 1);
+        String sub1 = "Level " + player.getLevel() + "  |  EXP " + player.getExp() + "/" + player.getExpToNext();
+        textLayout.setText(hudFont, sub1);
+        hudFont.draw(batch, sub1, (screenW - textLayout.width) / 2f, screenH / 2f);
+
+        hudFont.setColor(0.6f, 0.6f, 0.6f, 1);
+        String sub2 = "Press [R] to Restart  |  [M] for Menu";
+        textLayout.setText(hudFont, sub2);
+        hudFont.draw(batch, sub2, (screenW - textLayout.width) / 2f, screenH / 2f - 30);
+        batch.end();
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
+            game.setScreen(new GameScreen(game, characterPath, characterName));
+        } else if (Gdx.input.isKeyJustPressed(Input.Keys.M)) {
+            game.setScreen(new MainMenuScreen(game));
+        }
+    }
+
+    private void drawDialogue() {
+        if (dialogueLines == null || dialogueNpc == null) return;
+
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+
+        OrthographicCamera hudCam = new OrthographicCamera(screenW, screenH);
+        hudCam.position.set(screenW / 2f, screenH / 2f, 0);
+        hudCam.update();
+
+        float panelW = 520;
+        float panelH = 180;
+        float panelX = (screenW - panelW) / 2f;
+        float panelY = 40;
+        float pad = 12;
+        float spriteSize = 80;
+
+        hudRenderer.setProjectionMatrix(hudCam.combined);
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0.08f, 0.08f, 0.12f, 0.9f);
+        hudRenderer.rect(panelX, panelY, panelW, panelH);
+        hudRenderer.end();
+
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.4f, 0.4f, 0.5f, 1);
+        hudRenderer.rect(panelX, panelY, panelW, panelH);
+        hudRenderer.end();
+
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+
+        float spriteX = panelX + pad;
+        float spriteY = panelY + pad + (panelH - pad * 2 - spriteSize) / 2f;
+        TextureRegion frame = dialogueNpc.getCurrentFrame();
+        if (frame != null) {
+            batch.draw(frame, spriteX, spriteY, spriteSize, spriteSize);
+        }
+
+        float textX = spriteX + spriteSize + pad * 2;
+        float textY = panelY + panelH - pad - 8;
+        hudFont.setColor(1, 0.85f, 0.4f, 1);
+        hudFont.draw(batch, "Healer", textX, textY);
+
+        float speechY = textY - 24;
+        hudFont.setColor(0.95f, 0.95f, 0.95f, 1);
+        String pageText = dialoguePage < dialogueLines.length ? dialogueLines[dialoguePage] : "";
+        textLayout.setText(hudFont, pageText);
+        float wrapWidth = panelW - (textX - panelX) - pad;
+        if (textLayout.width > wrapWidth) {
+            String[] words = pageText.split(" ");
+            StringBuilder line1 = new StringBuilder();
+            StringBuilder line2 = new StringBuilder();
+            boolean second = false;
+            for (String w : words) {
+                StringBuilder test = new StringBuilder(second ? line2 : line1);
+                if (test.length() > 0) test.append(" ");
+                test.append(w);
+                textLayout.setText(hudFont, test.toString());
+                if (textLayout.width > wrapWidth) {
+                    if (!second) { second = true; line2.append(w); }
+                } else {
+                    if (second) line2.append(" ").append(w);
+                    else { if (line1.length() > 0) line1.append(" "); line1.append(w); }
+                }
+            }
+            hudFont.draw(batch, line1.toString(), textX, speechY);
+            if (line2.length() > 0) hudFont.draw(batch, line2.toString(), textX, speechY - 20);
+        } else {
+            hudFont.draw(batch, pageText, textX, speechY);
+        }
+
+        float closeBtnX = panelX + panelW - 28;
+        float closeBtnY = panelY + panelH - 28;
+        float closeBtnSize = 20;
+        hudFont.setColor(0.8f, 0.3f, 0.3f, 1);
+        hudFont.draw(batch, "X", closeBtnX + 4, closeBtnY + 15);
+
+        if (!clickConsumed && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            float mx = Gdx.input.getX();
+            float my = screenH - Gdx.input.getY();
+
+            if (mx >= closeBtnX && mx <= closeBtnX + closeBtnSize && my >= closeBtnY && my <= closeBtnY + closeBtnSize) {
+                dialogueOpen = false;
+            } else if (dialoguePage < dialogueLines.length - 1) {
+                float nextBtnX = panelX + panelW - 80;
+                float nextBtnY = panelY + 10;
+                if (mx >= nextBtnX && mx <= nextBtnX + 70 && my >= nextBtnY && my <= nextBtnY + 20) {
+                    dialoguePage++;
+                }
+            }
+            clickConsumed = true;
+        }
+
+        if (dialoguePage < dialogueLines.length - 1) {
+            float nextBtnX = panelX + panelW - 80;
+            float nextBtnY = panelY + 10;
+            hudFont.setColor(0.3f, 0.6f, 1f, 1);
+            hudFont.draw(batch, "[Next >>]", nextBtnX, nextBtnY + 14);
+        }
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            if (dialoguePage < dialogueLines.length - 1) {
+                dialoguePage++;
+            } else {
+                dialogueOpen = false;
+            }
+        }
+
+        batch.end();
+    }
+
+    private void drawPauseMenu() {
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+
+        OrthographicCamera hudCam = new OrthographicCamera(screenW, screenH);
+        hudCam.position.set(screenW / 2f, screenH / 2f, 0);
+        hudCam.update();
+
+        float panelW = 240;
+        float panelH = 180;
+        float panelX = (screenW - panelW) / 2f;
+        float panelY = (screenH - panelH) / 2f;
+
+        hudRenderer.setProjectionMatrix(hudCam.combined);
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0.1f, 0.1f, 0.14f, 0.92f);
+        hudRenderer.rect(panelX, panelY, panelW, panelH);
+        hudRenderer.end();
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.4f, 0.4f, 0.5f, 1);
+        hudRenderer.rect(panelX, panelY, panelW, panelH);
+        hudRenderer.end();
+
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+
+        hudFont.setColor(1, 1, 1, 1);
+        textLayout.setText(hudFont, "PAUSED");
+        hudFont.draw(batch, "PAUSED", (screenW - textLayout.width) / 2f, panelY + panelH - 18);
+
+        float btnW = 160;
+        float btnH = 30;
+        float btnX = (screenW - btnW) / 2f;
+        float labelX = btnX + 10;
+        float restY = panelY + panelH - 56;
+        float menuY = restY - 46;
+        float closeY = menuY - 46;
+
+        hudFont.setColor(0.9f, 0.9f, 0.9f, 1);
+        hudFont.draw(batch, "[R] Restart", labelX, restY + 20);
+        hudFont.draw(batch, "[M] Main Menu", labelX, menuY + 20);
+        hudFont.setColor(0.5f, 0.5f, 0.5f, 1);
+        hudFont.draw(batch, "[Esc] Close", labelX, closeY + 20);
+
+        batch.end();
+
+        if (!clickConsumed && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            float mx = Gdx.input.getX();
+            float my = screenH - Gdx.input.getY();
+            if (mx >= btnX && mx <= btnX + btnW && my >= restY && my <= restY + btnH) {
+                game.setScreen(new GameScreen(game, characterPath, characterName));
+            } else if (mx >= btnX && mx <= btnX + btnW && my >= menuY && my <= menuY + btnH) {
+                game.setScreen(new MainMenuScreen(game));
+            } else if (mx >= btnX && mx <= btnX + btnW && my >= closeY && my <= closeY + btnH) {
+                showMenu = false;
+            } else if (!(mx >= panelX && mx <= panelX + panelW && my >= panelY && my <= panelY + panelH)) {
+                showMenu = false;
+            }
+            clickConsumed = true;
+        }
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
+            game.setScreen(new GameScreen(game, characterPath, characterName));
+        } else if (Gdx.input.isKeyJustPressed(Input.Keys.M)) {
+            game.setScreen(new MainMenuScreen(game));
+        } else if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            showMenu = false;
+        }
+    }
+
+    private boolean isNpcInPlayerAttackRange() {
+        if (healerNpc.isDead()) return false;
+        float px = player.getX() + player.getWidth() * 0.3f;
+        float py = player.getY() + player.getHeight() * 0.3f;
+        float nx = healerNpc.getX() + healerNpc.getWidth() * 0.3f;
+        float ny = healerNpc.getY() + healerNpc.getHeight() * 0.3f;
+        float dx = nx - px;
+        float dy = ny - py;
+        float dist = (float)Math.sqrt(dx * dx + dy * dy);
+        return dist < 40f;
+    }
+
+    private boolean isPlayerNearNpc() {
+        if (healerNpc == null || healerNpc.isDead()) return false;
+        float px = player.getX() + player.getWidth() * 0.3f;
+        float py = player.getY() + player.getHeight() * 0.3f;
+        float nx = healerNpc.getX() + healerNpc.getWidth() * 0.3f;
+        float ny = healerNpc.getY() + healerNpc.getHeight() * 0.3f;
+        float dx = nx - px;
+        float dy = ny - py;
+        float dist = (float)Math.sqrt(dx * dx + dy * dy);
+        return dist < 50f;
     }
 
     private void drawCollisionDebug() {
@@ -260,14 +663,12 @@ public class GameScreen implements Screen {
             if (layer == null) continue;
             for (int tx = 0; tx < layer.getWidth(); tx++) {
                 for (int ty = 0; ty < layer.getHeight(); ty++) {
-                    // Skip tiles overridden by a road
                     if (street != null) {
                         TiledMapTileLayer.Cell sc = street.getCell(tx, ty);
                         if (sc != null && sc.getTile() != null) continue;
                     }
                     TiledMapTileLayer.Cell cell = layer.getCell(tx, ty);
                     if (cell != null && cell.getTile() != null) {
-                        // On the House layer, only mark actual houses (GID 26–34)
                         if (layerName.equals("House")) {
                             int gid = cell.getTile().getId();
                             if (gid < 26 || gid > 34) continue;
@@ -291,7 +692,6 @@ public class GameScreen implements Screen {
 
         hudRenderer.setProjectionMatrix(hudCam.combined);
 
-        // ── Layout ──
         int margin = 16;
         int padding = 8;
         float barW = 180, barH = 16;
@@ -302,13 +702,11 @@ public class GameScreen implements Screen {
         float innerH = barH * 2 + padding * 2 + 20;
         float panelY = screenH - margin - innerH;
 
-        // ── Panel background ──
         hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
         hudRenderer.setColor(0, 0, 0, 0.55f);
         hudRenderer.rect(panelX, panelY, panelW, innerH);
         hudRenderer.end();
 
-        // ── Panel border ──
         hudRenderer.begin(ShapeRenderer.ShapeType.Line);
         hudRenderer.setColor(0.5f, 0.5f, 0.5f, 0.8f);
         hudRenderer.rect(panelX, panelY, panelW, innerH);
@@ -318,7 +716,6 @@ public class GameScreen implements Screen {
         float barX  = labelX + labelW;
         float contentY = panelY + padding + 10;
 
-        // ── HP bar ──
         float hpY = contentY + barH + padding;
         float hpFill = (float)player.getHealth() / player.getMaxHealth();
 
@@ -332,13 +729,11 @@ public class GameScreen implements Screen {
         hudRenderer.rect(barX, hpY, barW * hpFill, barH);
         hudRenderer.end();
 
-        // HP bar border
         hudRenderer.begin(ShapeRenderer.ShapeType.Line);
         hudRenderer.setColor(0.4f, 0.4f, 0.4f, 1);
         hudRenderer.rect(barX, hpY, barW, barH);
         hudRenderer.end();
 
-        // ── EXP bar ──
         float expY = contentY;
         float expFill = (float)player.getExp() / Math.max(player.getExpToNext(), 1);
 
@@ -351,13 +746,11 @@ public class GameScreen implements Screen {
         hudRenderer.rect(barX, expY, barW * expFill, barH);
         hudRenderer.end();
 
-        // EXP bar border
         hudRenderer.begin(ShapeRenderer.ShapeType.Line);
         hudRenderer.setColor(0.4f, 0.4f, 0.4f, 1);
         hudRenderer.rect(barX, expY, barW, barH);
         hudRenderer.end();
 
-        // ── Text labels ──
         batch.setProjectionMatrix(hudCam.combined);
         batch.begin();
         hudFont.setColor(0.95f, 0.95f, 0.95f, 1);
@@ -370,10 +763,41 @@ public class GameScreen implements Screen {
         hudFont.draw(batch, "EXP", labelX, textY);
         hudFont.draw(batch, player.getExp() + "/" + player.getExpToNext(), barX + barW - 50, textY);
 
-        // Level indicator (below EXP bar)
         hudFont.setColor(1, 0.85f, 0.2f, 1);
         hudFont.draw(batch, "Lv." + player.getLevel(), barX, expY - 2);
+
         batch.end();
+
+        float btnW = 56;
+        float btnH = 30;
+        float btnX = screenW - btnW - 10;
+        float btnY = screenH - btnH - 10;
+        hudRenderer.setProjectionMatrix(hudCam.combined);
+        hudRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        hudRenderer.setColor(0.15f, 0.15f, 0.2f, 0.7f);
+        hudRenderer.rect(btnX, btnY, btnW, btnH);
+        hudRenderer.end();
+        hudRenderer.begin(ShapeRenderer.ShapeType.Line);
+        hudRenderer.setColor(0.4f, 0.4f, 0.5f, 0.6f);
+        hudRenderer.rect(btnX, btnY, btnW, btnH);
+        hudRenderer.end();
+
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        hudFont.setColor(0.8f, 0.8f, 0.8f, 1);
+        textLayout.setText(hudFont, "MENU");
+        hudFont.draw(batch, "MENU", btnX + (btnW - textLayout.width) / 2f, btnY + 20);
+
+        batch.end();
+
+        if (!clickConsumed && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            float mx = Gdx.input.getX();
+            float my = screenH - Gdx.input.getY();
+            if (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + btnH) {
+                showMenu = !showMenu;
+                clickConsumed = true;
+            }
+        }
     }
 
     @Override
@@ -396,10 +820,12 @@ public class GameScreen implements Screen {
     public void dispose() {
         if (batch != null) batch.dispose();
         if (player != null) player.dispose();
+        if (healerNpc != null) healerNpc.dispose();
         if (map != null) map.dispose();
         if (mapRenderer != null) mapRenderer.dispose();
         if (debugRenderer != null) debugRenderer.dispose();
         if (hudRenderer != null) hudRenderer.dispose();
         if (hudFont != null) hudFont.dispose();
+        if (fbo != null) fbo.dispose();
     }
 }

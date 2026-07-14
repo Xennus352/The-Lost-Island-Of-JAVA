@@ -40,9 +40,11 @@ public class MainMenuScreen implements Screen {
         touchPoint = new Vector3();
 
         camera = new OrthographicCamera();
+        // Scaling.stretch is used to fit the virtual size exactly to the screen dimensions
         viewport = new ScalingViewport(Scaling.stretch, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, camera);
-        viewport.apply();
+        viewport.apply(true); // Center the camera on creation
 
+        // Button boundaries based on your 640x480 virtual resolution
         btnStartBounds = new Rectangle(400, 280, 200, 45);
         btnMissionBounds = new Rectangle(400, 220, 200, 45);
         btnSettingsBounds = new Rectangle(400, 160, 200, 45);
@@ -50,6 +52,7 @@ public class MainMenuScreen implements Screen {
 
     @Override
     public void render(float delta) {
+        // Clear screen logic can be added here if needed, but drawing full screen background handles it
         camera.update();
         batch.setProjectionMatrix(camera.combined);
 
@@ -57,15 +60,20 @@ public class MainMenuScreen implements Screen {
         batch.draw(menuBackground, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         batch.end();
 
-        // 🌟 FIXED HERE: Changed from GameScreen() to CharacterSelectScreen(game)
+        // Keyboard shortcut fallback
         if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
             game.setScreen(new CharacterSelectScreen(game));
         }
 
+        // Handle clicks/touches
         if (Gdx.input.justTouched()) {
+            // 1. Get raw screen coordinates
             touchPoint.set(Gdx.input.getX(), Gdx.input.getY(), 0);
+
+            // 2. Unproject screen coordinates into your virtual viewport space
             viewport.unproject(touchPoint);
 
+            // 3. Check boundaries using unprojected coordinates
             if (btnStartBounds.contains(touchPoint.x, touchPoint.y)) {
                 game.setScreen(new CharacterSelectScreen(game));
             }
@@ -80,6 +88,7 @@ public class MainMenuScreen implements Screen {
 
     @Override
     public void resize(int width, int height) {
+        // Correctly updates viewport size and maintains center alignment
         viewport.update(width, height, true);
     }
 
